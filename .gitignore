@@ -1,0 +1,17 @@
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build
+target/
+*.class
+*.jar
+__pycache__/
+*.pyc
+
+# Local Config
+.env
+.gemini/
+application.properties.bak

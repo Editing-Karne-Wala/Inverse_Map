@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Inverse Map - Kolkata Safety MVP</title>
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+    <meta charset="utf-8">
+    <style>
+        #map { height: 100%; }
+        html, body { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #floating-panel {
+            position: absolute; top: 10px; left: 25%; z-index: 5;
+            background-color: rgba(0,0,0,0.85); color: white;
+            padding: 15px; border-radius: 8px; text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); width: 50%;
+        }
+        button {
+            background-color: #00e676; border: none; padding: 10px 20px;
+            font-weight: bold; border-radius: 4px; cursor: pointer; color: #000;
+        }
+        .status { margin-top: 10px; font-size: 0.9em; color: #aaa; }
+    </style>
+</head>
+<body>
+    <div id="floating-panel">
+        <h3>Inverse Map: Kolkata Safety Route</h3>
+        <button onclick="calculateSafeRoute()">FIND SAFEST ROUTE</button>
+        <div class="status" id="status">Current focus: Madhyamgram to Rajarhat (Live Traffic Sync)</div>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        let map;
+        let polyline;
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                zoom: 12,
+                center: {lat: 22.6500, lng: 88.4500},
+                styles: [
+                    { "elementType": "geometry", "stylers": [{ "color": "#242f3e" }] },
+                    { "elementType": "labels.text.stroke", "stylers": [{ "color": "#242f3e" }] },
+                    { "elementType": "labels.text.fill", "stylers": [{ "color": "#746855" }] },
+                    { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#38414e" }] },
+                    { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#212a37" }] },
+                    { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#746855" }] }
+                ]
+            });
+        }
+
+        async function calculateSafeRoute() {
+            document.getElementById('status').innerText = "Analyzing Live Crowd Density...";
+            
+            try {
+                const response = await fetch('/api/route');
+                const data = await response.json();
+                
+                if (polyline) polyline.setMap(null);
+
+                const pathCoords = data.map(coord => ({lat: coord[0], lng: coord[1]}));
+
+                polyline = new google.maps.Polyline({
+                    path: pathCoords,
+                    geodesic: true,
+                    strokeColor: '#00e676',
+                    strokeOpacity: 0.8,
+                    strokeWeight: 7
+                });
+
+                polyline.setMap(map);
+                
+                // Add Markers
+                new google.maps.Marker({ position: pathCoords[0], map: map, label: 'START' });
+                new google.maps.Marker({ position: pathCoords[pathCoords.length - 1], map: map, label: 'END' });
+
+                document.getElementById('status').innerText = "Safe Path Found via Arterial Expressways (Higher Crowd Visibility)";
+            } catch (err) {
+                document.getElementById('status').innerText = "Error fetching safety route.";
+                console.error(err);
+            }
+        }
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCOKQ_aLwWm_Dm82OslP5FMXFM09jRiimE&callback=initMap" async defer></script>
+</body>
+</html>

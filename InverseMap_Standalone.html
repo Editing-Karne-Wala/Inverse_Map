@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Inverse Map - Kolkata Safety MVP</title>
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+    <meta charset="utf-8">
+    <style>
+        #map { height: 100vh; width: 100%; }
+        body { margin: 0; padding: 0; font-family: 'Inter', sans-serif; background: #0f172a; }
+        #floating-panel {
+            position: absolute; top: 20px; left: 20px; z-index: 1000;
+            background: rgba(15, 23, 42, 0.9); color: white; padding: 25px; border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6); width: 350px;
+            backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1);
+        }
+        h2 { margin: 0 0 5px 0; color: #10b981; font-size: 1.3rem; letter-spacing: -0.5px; }
+        p { font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 5px; text-transform: uppercase; font-weight: 700; }
+        input {
+            width: 93%; background: rgba(30, 41, 59, 0.8); border: 1px solid #334155;
+            padding: 12px; color: white; border-radius: 8px; font-size: 0.9rem; outline: none;
+        }
+        input:focus { border-color: #10b981; }
+        button {
+            background: #10b981; color: white; border: none; padding: 14px;
+            border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%;
+            transition: all 0.2s; margin-top: 10px; font-size: 1rem;
+        }
+        button:hover { background: #059669; transform: translateY(-1px); }
+        #status { margin-top: 15px; font-size: 0.8rem; text-align: center; color: #34d399; min-height: 20px; }
+        .pac-container { border-radius: 8px; margin-top: 5px; background: #1e293b; border: 1px solid #334155; color: white; }
+        .pac-item { color: #94a3b8; border-top: 1px solid #334155; padding: 10px; cursor: pointer; }
+        .pac-item:hover { background: #334155; }
+        .pac-item-query { color: white; }
+    </style>
+</head>
+<body>
+    <div id="floating-panel">
+        <h2>Inverse Map</h2>
+        <p>Prioritizing crowd visibility for women's safety.</p>
+        
+        <div class="input-group">
+            <label>Pickup Point</label>
+            <input id="pickup" type="text" placeholder="Start location...">
+        </div>
+        
+        <div class="input-group">
+            <label>Destination</label>
+            <input id="destination" type="text" placeholder="Where to?">
+        </div>
+        
+        <button onclick="calculateSafeRoute()">FIND SAFE ROUTE</button>
+        <div id="status">Ready for Analysis</div>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        let map;
+        let polyline;
+        let markers = [];
+        let autocompletePickup;
+        let autocompleteDest;
+
+        function initMap() {
+            try {
+                const kolkata = {lat: 22.5726, lng: 88.3639};
+                map = new google.maps.Map(document.getElementById('map'), {
+                    zoom: 12, center: kolkata,
+                    disableDefaultUI: true,
+                    styles: [
+                        { "elementType": "geometry", "stylers": [{ "color": "#0f172a" }] },
+                        { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#1e293b" }] },
+                        { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#334155" }] },
+                        { "elementType": "labels.text.fill", "stylers": [{ "color": "#94a3b8" }] }
+                    ]
+                });
+
+                // Autocomplete Setup - Wrapped to prevent failure
+                try {
+                    autocompletePickup = new google.maps.places.Autocomplete(document.getElementById('pickup'));
+                    autocompleteDest = new google.maps.places.Autocomplete(document.getElementById('destination'));
+                    
+                    const kolkataBounds = new google.maps.LatLngBounds(
+                        new google.maps.LatLng(22.4, 88.2),
+                        new google.maps.LatLng(22.7, 88.5)
+                    );
+                    autocompletePickup.setBounds(kolkataBounds);
+                    autocompleteDest.setBounds(kolkataBounds);
+                } catch (e) {
+                    console.warn("Autocomplete failed to init - using manual mode.");
+                }
+            } catch (e) {
+                console.error("Critical: Google Maps failed to load.", e);
+                document.getElementById('status').innerText = "Map API Error. Ensure Billing is enabled.";
+            }
+        }
+
+        async function calculateSafeRoute() {
+            let origin, destination;
+            
+            // Safe check for autocomplete selection vs manual typing
+            try {
+                const pickupPlace = (typeof autocompletePickup !== 'undefined' && autocompletePickup) ? autocompletePickup.getPlace() : null;
+                const destPlace = (typeof autocompleteDest !== 'undefined' && autocompleteDest) ? autocompleteDest.getPlace() : null;
+
+                if (!pickupPlace || !pickupPlace.geometry) {
+                    origin = document.getElementById('pickup').value;
+                } else {
+                    origin = `${pickupPlace.geometry.location.lat()},${pickupPlace.geometry.location.lng()}`;
+                }
+
+                if (!destPlace || !destPlace.geometry) {
+                    destination = document.getElementById('destination').value;
+                } else {
+                    destination = `${destPlace.geometry.location.lat()},${destPlace.geometry.location.lng()}`;
+                }
+            } catch (e) {
+                // Fallback for manual entry if Autocomplete crashed
+                origin = document.getElementById('pickup').value;
+                destination = document.getElementById('destination').value;
+            }
+
+            if (!origin || !destination) return;
+
+            document.getElementById('status').innerText = "Analyzing Live Crowd Density...";
+            
+            try {
+                const response = await fetch(`/api/route?origin=${origin}&destination=${destination}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('status').innerText = "Error: " + data.error;
+                    return;
+                }
+
+                // Clear overlays
+                if (polyline) polyline.setMap(null);
+                markers.forEach(m => m.setMap(null));
+                markers = [];
+
+                const points = data.points.map(p => ({lat: p[0], lng: p[1]}));
+
+                polyline = new google.maps.Polyline({
+                    path: points, geodesic: true, strokeColor: '#10b981',
+                    strokeOpacity: 1.0, strokeWeight: 6, map: map
+                });
+
+                const bounds = new google.maps.LatLngBounds();
+                points.forEach(p => bounds.extend(p));
+                map.fitBounds(bounds);
+
+                markers.push(new google.maps.Marker({ position: points[0], map: map, label: "P" }));
+                markers.push(new google.maps.Marker({ position: points[points.length-1], map: map, label: "D" }));
+
+                document.getElementById('status').innerText = `Safe Route Found via ${data.summary} (Crowd Factor: ${data.safety_score})`;
+            } catch (err) {
+                document.getElementById('status').innerText = "Backend Error. Ensure python app.py is running.";
+            }
+        }
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCOKQ_aLwWm_Dm82OslP5FMXFM09jRiimE&libraries=places&callback=initMap" async defer></script>
+</body>
+</html>
